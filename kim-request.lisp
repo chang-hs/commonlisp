@@ -1,0 +1,101 @@
+(require 'cl-ppcre)
+(require 'postmodern)
+(use-package :my-util)
+(use-package :operation)
+;;;id-modifier : string -> string
+;;;id-modifier takes a patient_id in string, and replace its last digit with "X"
+(defun id-modifier (id)
+  (multiple-value-bind (a b) (cl-ppcre:scan-to-strings "([0-9]*)[0-9]" id)
+    (concatenate 'string (elt b 0) "X")))
+
+(defun op-list-interval (begin end)
+  (mapcar #'first
+          (postmodern:query (:order-by
+                             (:select 'o.op_id 'o.op_date :distinct
+                                      :from (:as 'op 'o)
+                                      :left-join (:as 'op_diag 'od)
+                                      :on (:= 'o.op_id 'od.op_id)
+                                      :left-join (:as 'diagnosis 'd)
+                                      :on (:= 'od.disease_id 'd.disease_id)
+                                      :where
+                                      (:and (:>= 'o.op_date begin)
+                                            (:<= 'o.op_date end)
+                                            (:= 'd.major_div_id 2)))
+                             'o.op_date))))
+
+(defun op-list-interval-all (begin end)
+  (mapcar #'first
+          (postmodern:query (:order-by
+                             (:select 'o.op_id 'o.op_date :distinct
+                                      :from (:as 'op 'o)
+                                      :left-join (:as 'op_diag 'od)
+                                      :on (:= 'o.op_id 'od.op_id)
+                                      :left-join (:as 'diagnosis 'd)
+                                      :on (:= 'od.disease_id 'd.disease_id)
+                                      :where
+                                      (:and (:>= 'o.op_date begin)
+                                            (:<= 'o.op_date end)))
+                             'o.op_date))))
+
+
+                                     
+
+(defun initial (str)
+	   (cond
+	     ((cl-ppcre:scan-to-strings "^[あ]" str) "A")
+	     ((cl-ppcre:scan-to-strings "^[ばびぶべぼ]" str) "B")
+	     ((cl-ppcre:scan-to-strings "^[ち]" str) "C")
+	     ((cl-ppcre:scan-to-strings "^[だぢづでど]" str) "D")
+	     ((cl-ppcre:scan-to-strings "^[え]" str) "E")
+	     ((cl-ppcre:scan-to-strings "^[ふ]" str) "F")
+	     ((cl-ppcre:scan-to-strings "^[がぎぐげご]" str) "G")
+	     ((cl-ppcre:scan-to-strings "^[はひへほ]" str) "H")
+	     ((cl-ppcre:scan-to-strings "^[い]" str) "I")
+	     ((cl-ppcre:scan-to-strings "^[じ]" str) "J")
+	     ((cl-ppcre:scan-to-strings "^[かきくけこ]" str) "K")
+	     ((cl-ppcre:scan-to-strings "^[まみむめも]" str) "M")
+	     ((cl-ppcre:scan-to-strings "^[なにぬねの]" str) "N")
+	     ((cl-ppcre:scan-to-strings "^[お]" str) "O")
+	     ((cl-ppcre:scan-to-strings "^[ぱぴぷぺぽ]" str) "P")
+	     ((cl-ppcre:scan-to-strings "^[らりるれろ]" str) "R")
+	     ((cl-ppcre:scan-to-strings "^[さしすせそ]" str) "S")
+	     ((cl-ppcre:scan-to-strings "^[たつてと]" str) "T")
+	     ((cl-ppcre:scan-to-strings "^[う]" str) "U")
+	     ((cl-ppcre:scan-to-strings "^[わを]" str) "W")
+             ((cl-ppcre:scan-to-strings "^[やゆよ]" str) "Y")
+             (t
+              (make-string 1 :initial-element (char-upcase (elt str 0))))))
+
+;;;kana-name-to-initials: string -> string
+;;;This function converts a kana-name string into initials separated with a space
+(defun kana-name-to-initials (str)
+  (let ((initial-list (mapcar #'initial (cl-ppcre:split "[\\s　]" str))))
+    (concatenate 'string (first initial-list) " " (first (rest initial-list)))))
+
+(defun output-op-record (op)
+  (list (id-modifier (patient-id op))
+        (kana-name-to-initials (kana-name op))
+        (my-util:my-decode-date (birthdate op))
+        (sex op)
+        (my-util:my-decode-date (op-date op))
+        (preop-dx op)
+        (patho-div op)
+        (location op)
+        (procedure op)
+        (surgeons op)
+        (assistants op)
+        "none"
+        "none"))
+
+(defun output-csv-file (filename from-date to-date)
+    (with-open-file (str filename :direction :output :if-does-not-exist :create :if-exists :supersede)
+      (format
+       str
+       "ID|Initial|Birthdate|Sex|Op-date|Preop Diagnosis|Pathology|Location|Procedure|Surgeons|Assistants|Instrument|Complication~%")
+      (my-util:lists-to-csv str
+                            (mapcar #'output-op-record
+                                    (mapcar #'make-instance-of-op-from-id
+                                            (op-list-interval from-date to-date))) #\|)))
+
+  
+  

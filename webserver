@@ -1,0 +1,341 @@
+;-*-Lisp-*-
+(defpackage :webserver
+	      (:use :common-lisp :hunchentoot :cl-who))
+(in-package :webserver)
+(require 'postmodern)
+(postmodern:connect-toplevel "patient" "chang" "nfkc505" "localhost")
+
+(defmacro partial-sql-surgeon (value)
+  (if value
+      `(:ilike 'surgeon ,value)
+      nil))
+
+(defun my-decode-date (date)
+  (multiple-value-bind (year month day)
+      (postmodern:decode-date date)
+    (format nil "~A-~A-~A" month day year)))
+
+;; Set encoding to utf-8
+(setf *hunchentoot-default-external-format* '(:utf-8 :eol-style :lf)
+      *default-content-type* "text/html; charset=utf-8")
+
+
+(setf *show-lisp-errors-p* t
+      *show-lisp-backtraces-p* t)
+
+(defun op-id-query (id)
+  (car
+   (postmodern:query (:select 'o.op_id 'p.patient_id 'p.kanji_name 'o.op_date
+                              'o.start_time 'o.end_time 'o.preop_dx 'o.indication
+                              'o.procedure 'o.op_note 'o.surgeons 'o.assistants
+                              :from (:as 'patient 'p)
+                              :left-join (:as 'op 'o) :on (:= 'p.patient_id 'o.patient_id)
+                              :where (:= 'o.op_id id)))))
+
+(defun authorized-user-p (usr passw)
+  (if (and (string= usr "chang") (string= passw "nfkc505"))
+      t
+      nil))
+
+(defmacro with-http-authentication (&rest body)
+  `(multiple-value-bind (username password) (hunchentoot:authorization)
+     (cond ((authorized-user-p username password)
+            ,@body)
+           (t (hunchentoot:require-authorization "lisp")))))
+
+;;;Output the formatted latex file from the op_id
+;;;    The output file is /home/chang/opnote/opnote-$OP_ID.tex
+;;;
+(defun format-op (id)
+  (multiple-value-bind (op-id patient-id patient-name date start-time end-time preop-dx
+				     indication procedure op-note surgeons assistants)
+	     (values-list (op-id-query id))
+    (let ((filename (format nil "/home/chang/opnote/opnote-~A.tex" op-id)))
+      (with-open-file (stream filename
+                              :direction :io
+                              :if-exists :overwrite
+                              :if-does-not-exist :create)
+        (format stream "\\documentclass[a4paper, 12pt]{jarticle}
+\\setlength{\\topmargin}{-0.5cm}
+\\setlength{\\topskip}{-0.5cm}
+\\setlength{\\headheight}{0cm}
+\\setlength{\\footskip}{1cm}
+\\setlength{\\oddsidemargin}{0cm}
+\\setlength{\\evensidemargin}{0cm}
+\\setlength{\\textheight}{25cm}
+\\setlength{\\textwidth}{17cm}
+\\renewcommand{\\rmdefault}{ugm}
+\\usepackage[T1]{fontenc}
+\\usepackage{textcomp}
+\\begin{document}
+\\begin{center}
+{\\bfseries \\large Operation Record\\\\}
+\\end{center}
+{\\bfseries Patient ID: }~A\\\\
+{\\bfseries Patient Name: }~A\\\\
+{\\bfseries Operation Date: }~A\\\\
+{\\bfseries Surgeons: }~A\\\\
+{\\bfseries Assistants: }~A\\\\
+{\\bfseries Starting time: }~A\\\\
+{\\bfseries Finishing time: }~A\\\\
+{\\bfseries Preop Diagnosis: }~A\\\\\\\\
+{\\bfseries Procedure: }~A\\\\\\\\
+{\\bfseries Indication:}~%~A~%\\\\\\\\
+{\\bfseries Procedure:}~%~A
+\\end{document}"
+                patient-id
+                patient-name
+                (my-decode-date date)
+                surgeons
+                assistants
+                start-time
+                end-time
+                preop-dx
+                procedure
+                indication
+                op-note)))))
+
+(define-easy-handler (easy-demo :uri "/lisp/hello1"
+                                :default-request-type :get)
+    ((state-variable :parameter-type 'string))
+  (with-html-output-to-string (*standard-output* nil :prologue t)
+    (:html
+     (:head (:title "Hello, world!"))
+     (:body
+      (:h1 "Hello, world!")
+      (:p "This is my Lisp web server, running on Hunchentoot,"
+          " as described in "
+          (:a :href
+              "http://newartisans.com/blog_files/hunchentoot.primer.php"
+              "this blog entry")
+          " on Common Lisp and Hunchentoot.")))))
+
+(define-easy-handler (op-input :uri "/lisp/opinput"
+                               :default-request-type :get)
+    ((state-variable :parameter-type 'string))
+  (with-html-output-to-string (*standard-output* nil :prologue t)
+    (:html
+     (:head
+      (:body
+       (:center
+        (:h2 "手術入力画面")
+        (:form :method "post" :accept-charset "utf8"
+                              :lang "JA"
+                              :enctype "multipart/form-data"
+                              :action "/lisp/opinput-proc"
+               (:table :border 3 :bgcolor "ivory"
+                       (:tr
+                        (:td (:label "手術日(yyyy-mm-dd): "))
+                        (:td (:input :type "text" :name "opdate"))
+                        (:td :rowspan 4 (:label "術者: "))
+                        (:td :rowspan 4
+                             (:select :name "surgeons" :multiple "true"
+                                      (:option "")
+                                      (:option "松居")
+                                      (:option "張")
+                                      (:option "谷口")
+                                      (:option "斎藤")
+                                      (:option "上條"))))
+                       (:tr
+                        (:td (:label "患者ID: "))
+                        (:td (:input :type "text" :name "id")))
+                       (:tr
+                        (:td (:label "患者名: "))
+                        (:td (:input :type "text" :name "name")))
+                       (:tr
+                        (:td (:label "診断: "))
+                        (:td (:input :type "text" :name "preop_dx")))
+                       (:tr
+                        (:td (:label "手術記載"))
+                        (:td (:textarea :name "opnote" :cols "40" :rows "10" :wrap "virtual" )))
+                       (:tr
+                        (:td (:input :type "file" :name "thefile")))
+                       (:tr
+                        (:td (:button :type "submit" "Submit")))))))))))
+
+
+(define-easy-handler (opnote :uri "/lisp/opnote" :default-request-type :GET)
+    ((op-id :real-name "op_id" :parameter-type 'INTEGER))
+  (with-html-output-to-string (*standard-output* nil :prologue t)
+    (:html
+     (:head
+      (:body
+       (let ((tex-filename)
+             (dvi-filename)
+             (pdf-filename)
+             (final-pdf-filename))
+         (setq tex-filename (format nil "/home/chang/opnote/opnote-~A.tex" op-id))
+         (setq dvi-filename (format nil "/home/chang/opnote-~A.dvi" op-id))
+         (setq pdf-filename (format nil "/home/chang/opnote-~A.pdf" op-id))
+         (setq log-filename (format nil "/home/chang/opnote-~A.log" op-id))
+         (setq aux-filename (format nil "/home/chang/opnote-~A.aux" op-id))
+         (setq final-pdf-filename (format nil "/home/chang/opnote/opnote-~A.pdf" op-id))
+         (str tex-filename)
+         (format-op op-id)
+         (sb-ext:run-program "emacs"
+                             (list "-batch" "-visit" tex-filename
+                                   "-eval" "(set-buffer-file-coding-system 'euc-jp)"
+                                   "-f" "save-buffer") :search t)
+         (sb-ext:run-program "platex"
+                             (list tex-filename ">&2" "/dev/null") :search t)
+         (sb-ext:run-program "dvipdfmx" (list dvi-filename) :search t)
+         (sb-ext:run-program "mv" (list dvi-filename "/home/chang/opnote") :search t)
+         (sb-ext:run-program "mv" (list pdf-filename "/home/chang/opnote") :search t)
+         (sb-ext:run-program "mv" (list log-filename "/home/chang/opnote") :search t)
+         (sb-ext:run-program "mv" (list aux-filename "/home/chang/opnote") :search t)
+         (handle-static-file final-pdf-filename "application/pdf")))))))
+;;;Function to add slashes before ', ", and \
+(defun addslash (string)
+	   (let ((tempstring))
+	     (setq tempstring (cl-ppcre:regex-replace-all "\\"
+							  string "\\\\\\\\"))
+	     (setq tempstring (cl-ppcre:regex-replace-all "'" tempstring "\\\\'"))
+	     (setq tempstring (cl-ppcre:regex-replace-all "\"" tempstring "\\\\\""))))
+
+;;;Function to remove added slashes to render the original string
+(defun removeslash (string)
+	   (let ((tempstring))
+	     (setq tempstring (cl-ppcre:regex-replace-all "\\\\'" string "'"))
+	     (setq tempstring (cl-ppcre:regex-replace-all "\\\\\\\"" tempstring "\""))
+	     (setq tempstring (cl-ppcre:regex-replace-all "\\\\\\\\"
+							  tempstring "\\"))))
+
+(define-easy-handler (opinput-proc :uri "/lisp/opinput-proc" :default-request-type :POST)
+    ((opdate :parameter-type 'string)
+     (patient_id :real-name "id" :parameter-type 'string)
+     (name :parameter-type 'string :request-type :POST)
+     (preop_dx :parameter-type 'string)
+     (surgeons :parameter-type 'list :request-type :POST)
+     (opnote :parameter-type 'string :request-type :POST)
+     (thefile))
+    (with-html-output-to-string (*standard-output* nil :prologue t)
+      (:html
+       (:head
+        (:body
+         (:center
+          (:p "手術日: " (str opdate))
+          (:p "ID: " (str patient_id))
+          (:p "患者名: " (str (url-decode name)))
+          (:p "術前診断: " (str preop_dx))
+          (:p "術者: " (str (url-decode (car surgeons))))
+          (:p "手術記載：　" (str (url-decode (removeslash (addslash opnote)))))))))))
+   
+(define-easy-handler (my-page :uri "/lisp/page"
+                              :default-request-type :POST)
+    ((state-variable :parameter-type 'string))
+  (let ((procedure (post-parameter "procedure"))
+        (datefrom (post-parameter "datefrom"))
+        (dateupto (post-parameter "dateupto"))
+        (surgeon (post-parameter "surgeon"))
+        (assistant (post-parameter "assistant"))
+        (preopdx (post-parameter "preop_dx"))
+        (opnote (post-parameter "opnote"))
+        (result)
+        )
+    (if (equal datefrom "") (setq datefrom "1900-1-1"))
+    (if (equal dateupto "") (setq dateupto "2999-1-1"))
+    (setq result (postmodern:query
+                  (concatenate 'string
+                               "select o.op_id, o.preop_dx, o.procedure, "
+                               "p.kanji_name, p.patient_id, o.op_date "
+                               "from op o, patient p "
+                               "where o.patient_id = p.patient_id "
+                               (if (not (equal datefrom ""))
+                                   (concatenate 'string "and o.op_date >= '" datefrom "' "))
+                               (if (not (equal dateupto ""))
+                                   (concatenate 'string "and o.op_date <= '" dateupto"' "))
+                               (if (not (equal surgeon  ""))
+                                   (concatenate 'string "and o.surgeons ilike "
+                                                (concatenate 'string "'%" surgeon "%' ")))
+                               (if (not (equal assistant ""))
+                                   (concatenate 'string "and o.assistants ilike "
+                                                (concatenate 'string "'%" assistant "%' ")))
+                               (if (not (equal procedure ""))
+                                   (concatenate 'string "and o.procedure ilike "
+                                                (concatenate 'string "'%" procedure "%' ")))
+                               (if (not (equal preopdx ""))
+                                   (concatenate 'string "and o.preop_dx ilike "
+                                                (concatenate 'string "'%" preopdx "%' ")))
+                               (if (not (equal opnote ""))
+                                   (concatenate 'string "and ("
+                                                "(o.op_note ilike "
+                                                (concatenate 'string "'%" opnote "%' ")
+                                                ") or "
+                                                "(o.indication ilike "
+                                                (concatenate 'string "'%" opnote "%' ")
+                                                ")) "))
+                               " order by o.op_date")))
+
+    (with-html-output-to-string (*standard-output* nil :prologue t)
+      (:html :lang "ja" :chaset "utf-8"
+             (:head
+              (:meta :http-equiv "Content-Type"
+                     :content "text/html; charset=UTF-8; encoding=UTF-8")
+              (:title "Search Result of Procedure"))
+             (:body
+              (:center
+               (:h1 "検索結果")
+               (:table :border "3" :bgcolor "cyan" :width "900pt"
+                       (:tr
+                        (:th  )
+                        (:th "op ID")
+                        (:th "Preop Dx")
+                        (:th "Procedure")
+                        (:th "患者名")
+                        (:th "ID")
+                        (:th "手術日"))
+                       (do* ((x result (cdr x))
+                             (item (car x) (car x))
+                             (i 1 (incf i)))
+                            ((endp x))
+                         (htm (:tr
+                               (:td (str i))
+                               (:td (:a :href
+                                           (concatenate 'string
+                                                        "/cgi-bin/opnote_txt.cgi?op_id="
+                                                        (write-to-string (car item)))
+                                           (str (car item))))
+                               (:td (str (second item)))
+                               (:td (str (third item)))
+                               (:td (str (fourth item)))
+                               (:td (:a :href
+                                       (concatenate 'string
+                                                    "/cgi-bin/ptdesc.cgi?id="
+                                                    (fifth item))
+                                       (str (fifth item))))
+                               (:td (str (my-decode-date (sixth item))))))))))))))
+
+(define-easy-handler (query :uri "/lisp/query"
+                            :default-request-type :get)
+    ((state-variable :parameter-type 'string))
+  (with-http-authentication
+      (with-html-output-to-string (*standard-output* nil :prologue t)
+        (:html
+         (:head
+          (:body
+           (:center
+            (:h2 "手術検索画面")
+            (:form :method "post" :action "/lisp/page"
+                   (:table :border 3 :bgcolor "ivory"
+                           (:tr (:td (:label "Date from: "))
+                                (:td (:input :type "text" :name "datefrom")))
+                           (:tr (:td (:label "Date upto: "))
+                                (:td (:input :type "text" :name "dateupto")))
+                           (:tr (:td (:label "Surgeon"))
+                                (:td (:input :type "text" :name "surgeon")))
+                           (:tr (:td (:lable "Assistant"))
+                                (:td (:input :type "text" :name "assistant")))
+                           (:tr (:td (:label "Preop Diagnosis: "))
+                                (:td (:input :type "text" :name "preop_dx")))
+                           (:tr (:td (:label "Procedure: "))
+                                (:td (:input :type "text" :name "procedure")))
+                           (:tr (:td (:label "Opnote: "))
+                                (:td (:input :type "text" :name "opnote")))
+                           (:tr (:td (:button :type "submit" "Submit"))))))))))))
+
+                
+(setf *dispatch-table*
+      (list #'dispatch-easy-handlers
+            #'default-dispatcher))
+
+

@@ -1,0 +1,8 @@
+(defun output-parbox (zip-code address kanji-name)
+  (format nil "\\parbox[c][5.08cm][c]{8.64cm}{~A\\\\~A\\\\~A}"
+          zip-code address kanji-name))
+
+(defun output-parbox-from-id (op-id)
+  (let ((op (make-instance-of-op-from-id op-id)))
+    (output-parbox (zip-code op) (address op) (kanji-name op))))
+

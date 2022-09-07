@@ -1,0 +1,38 @@
+(require 'cl-ppcre)
+
+;;;元号：datestringを、西暦の文字列に変換する関数
+(defun to-west-date (datestring)
+  (let ((result "") (resultstring))
+    (cond
+      ((car (setq result (multiple-value-list
+                     (cl-ppcre:scan-to-strings "^[sS]([0-9]*)([-\/][0-9].*)" datestring))))
+       (setq resultstring
+             (concatenate
+              'string
+              (write-to-string (+ 1925 (parse-integer (elt (elt result 1) 0))))
+              (elt (elt result 1) 1))))
+      ((car (setq result (multiple-value-list
+                     (cl-ppcre:scan-to-strings "^[tT]([0-9]*)([-\/][0-9].*)" datestring))))
+       (setq resultstring
+             (concatenate
+              'string
+              (write-to-string
+               (+ 1911 (parse-integer (elt (elt result 1) 0))))
+              (elt (elt result 1) 1))))
+      ((car (setq result (multiple-value-list
+                     (cl-ppcre:scan-to-strings "^[hH]([0-9]*)([-\/][0-9].*)" datestring))))
+       (setq resultstring
+             (concatenate
+              'string
+              (write-to-string (+ 1988 (parse-integer (elt (elt result 1) 0))))
+              (elt (elt result 1) 1))))
+      ((car (setq result (multiple-value-list
+                     (cl-ppcre:scan-to-strings "^[mM]([0-9]*)([-\/][0-9].*)" datestring))))
+       (setq resultstring
+             (concatenate
+              'string
+              (write-to-string (+ 1867 (parse-integer (elt (elt result 1) 0))))
+              (elt (elt result 1) 1))))
+      (t (setq resultstring datestring)))
+    resultstring))
+

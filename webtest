@@ -1,0 +1,86 @@
+(require 'cl+ssl)
+(require 'cl-who)
+(require 'postmodern)
+(postmodern:connect-toplevel "patient" "chang" "nfkc505" "localhost")
+
+(defun my-decode-date (date)
+  (multiple-value-bind (year month day)
+      (postmodern:decode-date date)
+    (format nil "~A-~A-~A" month day year)))
+
+
+
+
+(setf *show-lisp-errors-p* t
+      *show-lisp-backtraces-p* t)
+
+(define-easy-handler (easy-demo :uri "/lisp/hello1"
+                                :default-request-type :get)
+    ((state-variable :parameter-type 'string))
+  (with-html-output-to-string (*standard-output* nil :prologue t)
+    (:html
+     (:head (:title "Hello, world!"))
+     (:body
+      (:h1 "Hello, world!")
+      (:p "This is my Lisp web server, running on Hunchentoot,"
+          " as described in "
+          (:a :href
+              "http://newartisans.com/blog_files/hunchentoot.primer.php"
+              "this blog entry")
+          " on Common Lisp and Hunchentoot.")))))
+(define-easy-handler (my-page :uri "/lisp/page"
+                              :default-request-type :get)
+    ((state-variable :parameter-type 'string))
+  (let ((key (post-parameter "keyword" *request*))
+        (result))
+    (setq result (postmodern:query
+                  (:order-by
+                   (:select 'o.procedure 'p.kanji_name 'o.op_date
+                            :from (:as 'op 'o)
+                            :left-join (:as 'patient 'p)
+                            :on (:= 'p.patient_id 'o.patient_id)
+                            :where (:like 'o.procedure (concatenate 'string
+                                                                    "%" key "%")))
+                   'o.op_date)))
+    (with-html-output-to-string (*standard-output* nil :prologue t)
+      (:html :lang "ja" :chaset "utf-8"
+             (:head
+              (:meta :http-equiv "Content-Type"
+                     :content "text/html; charset=UTF-8; encoding=UTF-8")
+              (:title "Search Result of Procedure"))
+             (:body
+              (:center
+               (:h1 "検索結果")
+               (:table :border "3" :bgcolor "cyan" :width "800pt"
+                       (:tr
+                        (:th :wdith "10%" )
+                        (:th :width "50%" "Procedure")
+                        (:th :width "20%" "患者名")
+                        (:th :width "20%" "手術日"))
+                       (do* ((x result (cdr x))
+                             (item (car x) (car x))
+                             (i 1 (incf i)))
+                            ((endp x))
+                         (htm (:tr
+                               (:th (str i))
+                               (:td (str (car item)))
+                               (:td (str (second item)))
+                               (:td (str (my-decode-date (third item))))))))))))))
+
+(define-easy-handler (query :uri "/lisp/query"
+                            :default-request-type :get)
+    ((state-variable :parameter-type 'string))
+  (with-html-output-to-string (*standard-output* nil :prologue t)
+    (:html
+     (:head
+      (:body
+       (:form :method "post" :action "/lisp/page"
+              (:label "keyword: ")
+              (:input :type "text" :name "keyword")
+              (:br)
+              (:button :type "submit" "Submit")))))))
+(setf *dispatch-table*
+      (list #'dispatch-easy-handlers
+            #'default-dispatcher))
+
+

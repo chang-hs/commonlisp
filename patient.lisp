@@ -1,0 +1,285 @@
+(require 'postmodern)
+(require 'cl-ppcre)
+;(require 'my-util)
+(load "/Users/chang/clisp/statistics.lisp")
+(load "/Users/chang/clisp/util.lisp")
+
+(defclass operation ()
+  ((op-id :accessor op-id
+          :initform nil
+          :initarg :op-id)
+   (patient-id :accessor patient-id
+               :initform nil
+               :initarg :patient-id)
+   (kanji-name :accessor kanji-name
+               :initform nil
+               :initarg :kanji-name)
+   (kana-name :accessor kana-name
+              :initform nil
+              :initarg :kana-name)
+   (sex :accessor sex
+        :initform nil
+        :initarg :sex)
+   (op-date :accessor op-date
+            :initform nil
+            :initarg :op-date)
+   (start-time :accessor start-time
+               :initform nil
+               :initarg :start-time)
+   (end-time :accessor end-time
+             :initform nil
+             :initarg :end-time)
+   (preop-dx :accessor preop-dx
+             :initform nil
+             :initarg :preop-dx)
+   (postop-dx :accessor postop-dx
+              :initform nil
+              :initarg :postop-dx)
+   (patho-div :accessor patho-div
+              :initform nil
+              :initarg :patho-div)
+   (location :accessor location
+             :initform nil
+             :initarg :location)
+   (procedure :accessor procedure
+              :initform nil
+              :initarg :procedure)
+   (surgeons :accessor surgeons
+             :initform nil
+             :initarg :surgeons)
+   (assistants :accessor assistants
+               :initform nil
+               :initarg :assistants)
+   (indication :accessor indication
+               :initform nil
+               :initarg :indication)
+   (op-note :accessor op-note
+            :initform nil
+            :initarg :op-note)
+   (emergency :accessor emergency
+              :initform nil
+              :initarg :emergency)))
+
+(defun make-instance-of-op-from-id (op-id)
+  (multiple-value-bind
+        (op-id patient-id kanji-name kana-name sex op-date start-time end-time
+               preop-dx postop-dx patho-div location procedure surgeons assistants
+               indication op-note emergency)
+      (values-list
+       (car (postmodern:query (:select
+                               'o.op_id
+                               'o.patient_id
+                               'p.kanji_name
+                               'p.kana_name
+                               'p.sex
+                               'o.op_date
+                               'o.start_time
+                               'o.end_time
+                               'o.preop_dx
+                               'o.postop_dx
+                               'd.patho_div
+                               'd.location
+                               'o.procedure
+                               'o.surgeons
+                               'o.assistants
+                               'o.indication
+                               'o.op_note
+                               'o.emergency
+                               :from (:as 'op 'o)
+                               :left-join (:as 'patient 'p)
+                               :on (:= 'o.patient_id 'p.patient_id)
+                               :left-join (:as 'op_diag 'od)
+                               :on (:= 'o.op_id 'od.op_id)
+                               :left-join (:as 'diagnosis 'd)
+                               :on (:= 'od.disease_id 'd.disease_id)
+                               :where (:= 'o.op_id op-id)))))
+    (make-instance 'operation
+                   :op-id op-id
+                   :patient-id patient-id
+                   :kanji-name kanji-name
+                   :kana-name kana-name
+                   :sex sex
+                   :op-date op-date
+                   :start-time start-time
+                   :end-time end-time
+                   :preop-dx preop-dx
+                   :postop-dx postop-dx
+                   :patho-div (my-util:strip-white-space patho-div)
+                   :location (my-util:strip-white-space location)
+                   :procedure procedure
+                   :surgeons surgeons
+                   :assistants assistants
+                   :indication indication
+                   :op-note op-note
+                   :emergency emergency)))
+
+(defmacro make-form-from-op (op action)
+  `(:form :method "post" :accept-charset "utf8"
+         :lang "JA"
+         :enctype "multipart/form-data"
+         :action ,action
+         (:table :border 2 :bgcolor "olive"
+                 (:tr
+                  (:td (:input :type "text" :name "op-id" :value ,(op-id (eval op))))))))
+
+(defun op-list-from-disease-id (disease-id)
+  (mapcar #'make-instance-of-op-from-id
+          (mapcar 'car (postmodern:query
+                        (:order-by
+                         (:select 'o.op_id
+                                  :from (:as 'op 'o)
+                                  :left-join (:as 'op-diag 'od)
+                                  :on (:= 'o.op-id 'od.op-id)
+                                  :where
+                                  (:= 'od.disease_id disease-id))
+                         'o.op_id)))))
+
+;;;get-disease-id: string -> list of disease_id
+(defun get-disease-id (text)
+  (mapcar 'diag-data
+          (mapcar 'car (postmodern:query (:select 'disease_id
+                             :from 'diagnosis
+                             :where (:in
+                                     'disease_name_id
+                                     (:select 'disease_name_id
+                                              :from 'disease_name
+                                              :where (:like 'disease_name
+                                                            (concatenate 'string
+                                                                         "%"
+                                                                         text
+                                                                         "%")))))))))
+
+;;;diag-data: integer -> (integer string string string string)
+;;;diag-data takes disease-id and returns the list of diasease-id, disease_name,
+;;;major_div, patho_div, and location
+(defun diag-data (disease-id)
+  (funcall #'(lambda (x)
+               (list
+                disease-id
+                (first x)
+                (patient-major-div (second x))
+                (patient-patho-div (third x))
+                (patient-location (fourth x))))
+           (car
+
+            (postmodern:query (:select 'dn.disease_name 'd.major_div_id
+                                       'd.patho_div_id 'd.location_id
+                                       :from (:as 'diagnosis 'd)
+                                       :left-join (:as 'disease_name 'dn)
+                                       :on (:= 'd.disease_name_id 'dn.disease_name_id)
+                                       :where (:= 'd.disease_id disease-id))))))
+
+
+;;;major-div: integer -> string
+;;;This function takes a major_div_id and returns the name of the major division
+(defun patient-major-div (id)
+	   (my-util:strip-white-space (caar (postmodern:query (:select 'major_div
+			     :from 'majordiv
+			     :where (:= 'major_div_id id))))))
+;;;Same as major-div
+(defun patient-patho-div (id)
+  (my-util:strip-white-space (caar (postmodern:query (:select 'patho_div
+                                                      :from 'pathodiv
+                                                      :where (:= 'patho_div_id id))))))
+
+;;;Same as major-div
+(defun patient-location (id)
+  (my-util:strip-white-space (caar (postmodern:query (:select 'location
+                                                      :from 'location
+                                                      :where (:= 'location_id id))))))
+
+
+(defgeneric print-op (operation))
+
+
+(defmethod pprint-op ((op operation))
+  (format t
+          "Op-id: ~a~%Patient ID: ~a~%Patient Name: ~a~%Op date: ~a~%Preop Dx: ~a~%Procedure: ~a~%Indication: ~a~%Opnote: ~a~%~%"
+          (op-id op) (patient-id op) (kanji-name op) (op-date op) (preop-dx op)
+          (procedure op) (indication op) (op-note op)))
+
+;;;get-accessor: symbol -> function
+;;;This function takes a symbol that corresponds exactly to a field name of op table
+;;;and returns a special accessor function that takes an instance of operation and returns that field
+;;;of the instance.
+(defun get-accessor (field)
+  (case field
+    ('patient_id #'(lambda (op) (patient-id op)))
+    ('op-date #'(lambda (op) (op-date op)))
+    ('start-time #'(lambda (op) (start-time op)))
+    ('end-time #'(lambda (op) (end-time op)))
+    ('preop_dx #'(lambda (op) (preop-dx op)))
+    ('postop_dx #'(lambda (op) (postop-dx op)))
+    ('procedure #'(lambda (op) (procedure op)))
+    ('indication #'(lambda (op) (indication op)))
+    ('op_note #'(lambda (op) (op-note op)))))
+
+;;;update-op (operation symbol) :-> void
+;;;This function takes an instance of operation and a symbol that corresponds to the exact
+;;;word of a field in the op table, and updates that field on the op table
+(defmethod update-op ((op operation) field)
+  (if (member field '(kanji_name kana_name) :test #'equal)
+      (postmodern:query (:update 'patient
+                                 :set field (funcall (get-accessor field) op)
+                                 :where (:= 'patient_id (patient-id op))))
+      (postmodern:query (:update 'op
+                                 :set field (funcall (get-accessor field) op)
+                                 :where (:= 'op_id (op-id op))))))
+
+
+
+;;;mean-follow-up: (int int int list-of-op) -> float
+;;This function takes the integers for the month, day, year of the date of
+;;;looking back and the lift of op, and returns the mean follow up days
+(defun mean-follow-up (mm dd yyyy oplist)
+  (float
+   (/
+     (- (encode-universal-time 0 0 0 dd mm yyyy)
+           (statistics:mean (mapcar #'op-date oplist)))
+        60 60 24)))
+
+;;;prep-id: string -> string
+;;;This function takes a string of patient_id, and adds "0"s to its head
+;;;to make it a string of eight characters
+(defun prep-id (id)
+	   (let ((num (length id)))
+	     (cond
+	       ((< num 8)
+		(dotimes (x (- 8 num))
+		  (setf id (concatenate 'string "0" id)))
+		id)
+	       (t id))))
+
+;;;strip-cr-from-op: integer -> void
+;;;This function takes an op-id, and queries the indication and op_note from the op table
+;;;and strips the unnecessary \r
+(defun strip-cr-from-op (op-id)
+	   (multiple-value-bind
+		 (ind-string opnote-string)
+	       (values-list 
+		(car (postmodern:query (:select 'indication 'op_note
+						:from 'op :where (:= 'op_id op-id)))))
+	     (postmodern:query (:update 'op
+					:set 'indication (cl-ppcre:regex-replace-all "\\r" ind-string "")
+					'op_note (cl-ppcre:regex-replace-all "\\r" opnote-string "")
+					:where
+					(:= 'op_id op-id)))))
+
+(defun opnotes (oid)
+  (postmodern:query (:select 'indication 'op_note
+                             :from 'op
+                             :where (:= 'op_id oid))))
+
+(defmethod age-from-op ((op operation))
+  "Return the age of the patient drawn from the indication of the op"
+  (let ((indication (indication op)))
+    (if (or (not indication) (equal indication :null) (equal indication "")
+            (not (cl-ppcre:scan-to-strings "This ([0-9]*)-t?year" indication)))
+        nil
+        (multiple-value-bind (p q)
+            (parse-integer
+             (multiple-value-bind (a b)
+                 (cl-ppcre:scan-to-strings
+                  "This ([0-9]*)-t?year" indication)
+               (elt b 0)) :junk-allowed t)
+          p))))

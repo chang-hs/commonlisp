@@ -1,0 +1,3 @@
+(defun for-insert-property-from-patient (stream p)
+  (format stream "* ~A~%:PROPERTIES:~%:patient_id: ~A~%:END:"
+          (kanji-name p) (patient-id p)))

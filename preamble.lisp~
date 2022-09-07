@@ -1,0 +1,3 @@
+(defun preamble (level gender)
+  "Return the preamble for the opnote of lumbar decompression."
+  (format t "After induction of general anesthesia, ~a was placed in prone position with ~a hip in slight flexion.  The level of ~a was confirmed on a lateral X-ray, and was marked with indigo carmine.  An operating microscope was used from the beginning of the procedure.  " (case gender (f "she") (m "he")) (case gender (f "her") (m "his")) 

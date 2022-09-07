@@ -1,0 +1,8 @@
+SBCLを立ち上げる。
+(load "/home/chang/clisp/htsetup.lisp")
+Emacsを立ち上げる。
+M-x slime-connect
+return return
+(require 'hunchentoot)
+C-c C-l ~/clisp/webserver
+
